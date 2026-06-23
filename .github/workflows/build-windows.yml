@@ -1,7 +1,7 @@
 name: Build Windows Executable
 
 on:
-  workflow_dispatch: # Allows manual trigger from the Actions tab
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,7 +26,7 @@ jobs:
 
     - name: Run PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --collect-all markitdown --collect-all magika app.py
+        pyinstaller --onefile --noconsole --name="Mark-Those-things-up" --collect-all markitdown --collect-all magika app.py
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -36,9 +36,8 @@ jobs:
         body: |
           Automated build of Mark Those things up compiled for Windows architecture.
           
-          **Changes in this version:**
-          * Full packaging optimization including Magika classification models.
-          * Modern multi-threaded layout framework patch.
+          **Assets included:**
+          * Standalone executable with Magika models embedded.
         draft: false
         prerelease: false
-        files: dist/MarkThoseThingsUP-1.0.6.exe
+        files: dist/*.exe  # Uses a wildcard to guarantee it grabs the compiled executable
