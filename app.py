@@ -101,7 +101,8 @@ class BatchMarkItDownApp:
         self.tree.column("status", width=120, anchor=tk.CENTER)
         
         # 4. Footer Console Processing Panel
-        footer_frame = tk.Frame(self.root, bg="#1a1a1a", padding=15)
+# 4. Footer Console Processing Panel
+        footer_frame = tk.Frame(self.root, bg="#1a1a1a", padx=15, pady=15)
         footer_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
         self.progress_bar = ttk.Progressbar(footer_frame, style="Modern.Horizontal.TProgressbar", mode="determinate")
