@@ -24,7 +24,7 @@ jobs:
 
     - name: Run PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --collect-all markitdown app.py
+        pyinstaller --onefile --noconsole --collect-all markitdown --collect-all magika app.py
 
     - name: Upload Finished Exe
       uses: actions/upload-artifact@v4
