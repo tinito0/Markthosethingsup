@@ -4,12 +4,10 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from markitdown import MarkItDown
-import tksvg
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        # PyInstaller creates a temporary folder and stores its path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
@@ -23,23 +21,21 @@ class MarkThoseThingsUpApp:
         self.root.configure(bg="#1e1e1e")
         
         # Core batch data tracking
-        self.file_queue = []  # Elements: {"id": i, "path": "...", "name": "...", "type": "...", "size": "...", "status": "..."}
+        self.file_queue = []
         self.output_directory = None
         self.is_processing = False
         
-        # Initialize Microsoft's MarkItDown converter engine
+        # Initialize MarkItDown converter engine
         self.converter = MarkItDown()
         
-        # Load and bind application vector SVG logo
+        # Load and bind application window icon using cross-platform PNG
         self.logo_img = None
         try:
-            # tksvg parses raw vectors directly inside standard Tkinter setups
-            self.logo_img = tksvg.SvgImage(file=resource_path("logo.svg"))
+            self.logo_img = tk.PhotoImage(file=resource_path("logo.png"))
             self.root.iconphoto(False, self.logo_img)
         except Exception as e:
-            print(f"SVG icon failed to load natively: {e}")
+            print(f"Logo asset failed to load: {e}")
             
-        # Apply visual styles and spin up UI
         self.apply_styles()
         self.setup_ui()
 
@@ -47,7 +43,6 @@ class MarkThoseThingsUpApp:
         self.style = ttk.Style()
         self.style.theme_use("default")
         
-        # Configure Table Grid (Treeview) Styling
         self.style.configure("Treeview", 
             background="#252526", 
             foreground="#ffffff", 
@@ -64,7 +59,6 @@ class MarkThoseThingsUpApp:
         self.style.map("Treeview", background=[("selected", "#004b87")])
         self.style.map("Treeview.Heading", background=[("active", "#3e3e42")])
         
-        # Configure Progress Bar Styling
         self.style.configure("Modern.Horizontal.TProgressbar", 
             thickness=8, 
             troughcolor="#2d2d2d", 
@@ -79,7 +73,6 @@ class MarkThoseThingsUpApp:
         top_frame.pack_propagate(False)
         
         if self.logo_img:
-            # Draw vector logo inside header bar
             logo_display = tk.Label(top_frame, image=self.logo_img, bg="#1a1a1a")
             logo_display.image = self.logo_img
             logo_display.pack(side=tk.LEFT, padx=(20, 0))
@@ -97,7 +90,6 @@ class MarkThoseThingsUpApp:
         main_container = tk.Frame(self.root, bg="#1e1e1e", padx=20, pady=15)
         main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Upper action toolbar bar
         toolbar = tk.Frame(main_container, bg="#1e1e1e")
         toolbar.pack(fill=tk.X, pady=(0, 10))
         
@@ -117,8 +109,7 @@ class MarkThoseThingsUpApp:
         )
         self.btn_clear.pack(side=tk.LEFT, padx=8)
         
-        # Destination directory radio tracking buttons
-        self.dest_var = tk.IntVar(value=0) # 0 = matching source dir, 1 = user selected folder
+        self.dest_var = tk.IntVar(value=0)
         tk.Radiobutton(toolbar, text="Save next to source files", variable=self.dest_var, value=0, bg="#1e1e1e", fg="#bbbbbb", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="#ffffff", font=("Segoe UI", 9), command=self.toggle_dest_mode).pack(side=tk.RIGHT, padx=10)
         tk.Radiobutton(toolbar, text="Custom Folder...", variable=self.dest_var, value=1, bg="#1e1e1e", fg="#bbbbbb", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="#ffffff", font=("Segoe UI", 9), command=self.toggle_dest_mode).pack(side=tk.RIGHT)
         
@@ -225,7 +216,6 @@ class MarkThoseThingsUpApp:
         self.btn_add.config(state=tk.DISABLED)
         self.btn_clear.config(state=tk.DISABLED)
         
-        # Safely pass task thread execution over to a non-blocking background runner
         threading.Thread(target=self.process_batch, daemon=True).start()
 
     def process_batch(self):
@@ -239,7 +229,6 @@ class MarkThoseThingsUpApp:
             self.root.update_idletasks()
             
             try:
-                # Run the Microsoft document parsing logic
                 result = self.converter.convert(file_item["path"])
                 
                 if self.dest_var.get() == 0 or not self.output_directory:
@@ -254,8 +243,19 @@ class MarkThoseThingsUpApp:
                     
                 self.tree.item(str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], "✓ Success"))
             except Exception as e:
-                print(f"Error parsing document target: {e}")
+                print(f"Error parsing document: {e}")
                 self.tree.item(str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], "✕ Failed"))
                 
             self.progress_bar["value"] = index + 1
-            self.root.update
+            self.root.update_idletasks()
+            
+        self.is_processing = False
+        self.status_lbl.config(text=f"Batch job complete! Parsed {total_files} files.", fg="#4ec9b0")
+        self.btn_add.config(state=tk.NORMAL)
+        self.btn_clear.config(state=tk.NORMAL)
+        messagebox.showinfo("Conversion Pipeline Complete", "All documents in the queue have been successfully processed!")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MarkThoseThingsUpApp(root)
+    root.mainloop()
