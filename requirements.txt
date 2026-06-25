@@ -1,3 +1,2 @@
 markitdown[all]
 pyinstaller
-tksvg
