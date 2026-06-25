@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # JOB 1: Compiles the Windows Executable (Mantiene --onefile porque Windows sí necesita el .exe suelto)
+  # JOB 1: Windows executable (.exe — onefile required for portable distribution)
   build-windows:
     runs-on: windows-latest
     steps:
@@ -17,24 +17,161 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
+    - name: Cache PyInstaller build directory
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: pyinstaller-windows-${{ hashFiles('requirements.txt', 'app.py') }}
+        restore-keys: |
+          pyinstaller-windows-
+
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
 
     - name: Run PyInstaller (Windows)
+      # NOTE: --collect-all magika bundles TensorFlow Lite weights and significantly
+      # inflates the binary. If you are not using markitdown's AI-powered file-type
+      # detection, remove it and test — the binary can shrink by 50MB or more.
       run: |
         python -m PyInstaller --onefile --noconsole --name="Mark-Those-things-up" --add-data "logo.png;." --collect-all markitdown --collect-all magika app.py
-        
+
     - name: Upload Windows Staging Artifact
       uses: actions/upload-artifact@v4
       with:
         name: windows-bin
         path: dist/Mark-Those-things-up.exe
 
-  # JOB 2: Compiles the macOS Executable (OPTIMIZADO - Más rápido)
-  build-macos:
+  # JOB 2a: macOS Intel (x86_64) slice
+  build-macos-intel:
+    runs-on: macos-13        # macos-13 is the last Intel GitHub-hosted runner
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python (x86_64)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Cache PyInstaller build directory (Intel)
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: pyinstaller-macos-intel-${{ hashFiles('requirements.txt', 'app.py') }}
+        restore-keys: |
+          pyinstaller-macos-intel-
+
+    - name: Install Dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -r requirements.txt
+
+    - name: Run PyInstaller (Intel)
+      # NOTE: --collect-all magika bundles TensorFlow Lite weights (~50MB).
+      # Remove it if you are not using markitdown's AI file-type detection.
+      run: |
+        python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
+
+    - name: Upload Intel slice
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-intel-app
+        path: dist/Mark-Those-things-up.app
+
+  # JOB 2b: macOS Apple Silicon (arm64) slice
+  build-macos-arm:
+    runs-on: macos-latest     # macos-latest is now arm64 (M1) on GitHub Actions
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python (arm64)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Cache PyInstaller build directory (arm64)
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: pyinstaller-macos-arm-${{ hashFiles('requirements.txt', 'app.py') }}
+        restore-keys: |
+          pyinstaller-macos-arm-
+
+    - name: Install Dependencies
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -r requirements.txt
+
+    - name: Run PyInstaller (arm64)
+      run: |
+        python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
+
+    - name: Upload arm64 slice
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-arm-app
+        path: dist/Mark-Those-things-up.app
+
+  # JOB 2c: Merge both slices into a Universal binary using lipo, then zip
+  build-macos-universal:
+    needs: [build-macos-intel, build-macos-arm]
     runs-on: macos-latest
+    steps:
+    - name: Download Intel slice
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-intel-app
+        path: ./intel-app/Mark-Those-things-up.app
+
+    - name: Download arm64 slice
+      uses: actions/download-artifact@v4
+      with:
+        name: macos-arm-app
+        path: ./arm-app/Mark-Those-things-up.app
+
+    - name: Merge into Universal binary with lipo
+      run: |
+        # Copy the arm64 .app as the base for the Universal bundle
+        cp -R ./arm-app/Mark-Those-things-up.app ./universal-app/Mark-Those-things-up.app
+
+        # Find every Mach-O binary in the arm64 bundle and merge the Intel slice into it
+        find ./arm-app/Mark-Those-things-up.app -type f | while read arm_file; do
+          rel="${arm_file#./arm-app/Mark-Those-things-up.app/}"
+          intel_file="./intel-app/Mark-Those-things-up.app/$rel"
+          universal_file="./universal-app/Mark-Those-things-up.app/$rel"
+
+          if [ -f "$intel_file" ]; then
+            # Check if this is a Mach-O binary (not a text/resource file)
+            if file "$arm_file" | grep -q "Mach-O"; then
+              lipo -create "$arm_file" "$intel_file" -output "$universal_file"
+            fi
+          fi
+        done
+
+    - name: Remove quarantine attribute
+      # Strips com.apple.quarantine so end-users don't hit the Gatekeeper
+      # "damaged and can't be opened" dialog after downloading the zip.
+      run: xattr -cr ./universal-app/Mark-Those-things-up.app
+
+    - name: Zip Universal app
+      run: |
+        cd universal-app
+        zip -r ../Mark-Those-things-up-Mac-Universal.zip Mark-Those-things-up.app
+
+    - name: Upload macOS Universal Staging Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-bin
+        path: Mark-Those-things-up-Mac-Universal.zip
+
+  # JOB 3: Linux executable (.bin — same pattern as Windows, no platform-specific deps)
+  build-linux:
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -45,31 +182,45 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
+    - name: Cache PyInstaller build directory
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: pyinstaller-linux-${{ hashFiles('requirements.txt', 'app.py') }}
+        restore-keys: |
+          pyinstaller-linux-
+
     - name: Install Dependencies
       run: |
         python3 -m pip install --upgrade pip
         python3 -m pip install -r requirements.txt
+        # tkinter is not bundled with the GitHub Actions Python build on Linux
+        sudo apt-get install -y python3-tk
 
-    - name: Run PyInstaller and Compress (macOS)
+    - name: Run PyInstaller (Linux)
       run: |
-        # Se eliminó --onefile para evitar la compresión lenta de PyInstaller. --windowed creará el .app directamente.
-        python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
-        cd dist
-        zip -r ../Mark-Those-things-up-Mac.zip Mark-Those-things-up.app
+        python3 -m PyInstaller --onefile --noconsole --name="Mark-Those-things-up-Linux" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
 
-    - name: Upload macOS Staging Artifact
+    - name: Upload Linux Staging Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: macos-bin
-        path: Mark-Those-things-up-Mac.zip
+        name: linux-bin
+        path: dist/Mark-Those-things-up-Linux
 
-  # JOB 3: Collects both files and deploys a single unified release
+  # JOB 4: Collect all platform builds and publish a unified release
   create-release:
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos-universal, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+    - name: Checkout Code
+      # Required by softprops/action-gh-release to read commit history for
+      # auto-generated release notes.
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
     - name: Download Windows Asset
       uses: actions/download-artifact@v4
       with:
@@ -82,17 +233,29 @@ jobs:
         name: macos-bin
         path: ./release-payload
 
+    - name: Download Linux Asset
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-bin
+        path: ./release-payload
+
     - name: Create Unified GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: v1.6.${{ github.run_number }}
         name: Mark Those things up v1.6.${{ github.run_number }}
+        # generate_release_notes pulls commit messages since the last tag automatically.
+        generate_release_notes: true
         body: |
           Official cross-platform production release of **Mark Those things up**.
-          
+
           ### Download Assets 📦
-          * **Windows:** Download `Mark-Those-things-up.exe`
-          * **macOS:** Download `Mark-Those-things-up-Mac.zip`
+          | Platform | File |
+          |----------|------|
+          | Windows | `Mark-Those-things-up.exe` |
+          | macOS (Universal — Intel + Apple Silicon) | `Mark-Those-things-up-Mac-Universal.zip` |
+          | Linux | `Mark-Those-things-up-Linux` |
         draft: false
         prerelease: false
+        fail_on_unmatched_files: true
         files: ./release-payload/*
