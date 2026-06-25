@@ -43,47 +43,9 @@ jobs:
         name: windows-bin
         path: dist/Mark-Those-things-up.exe
 
-  # JOB 2a: macOS Intel (x86_64) slice
-  build-macos-intel:
-    runs-on: macos-13        # macos-13 is the last Intel GitHub-hosted runner
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Set up Python (x86_64)
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-
-    - name: Cache PyInstaller build directory (Intel)
-      uses: actions/cache@v4
-      with:
-        path: build
-        key: pyinstaller-macos-intel-${{ hashFiles('requirements.txt', 'app.py') }}
-        restore-keys: |
-          pyinstaller-macos-intel-
-
-    - name: Install Dependencies
-      run: |
-        python3 -m pip install --upgrade pip
-        python3 -m pip install -r requirements.txt
-
-    - name: Run PyInstaller (Intel)
-      # NOTE: --collect-all magika bundles TensorFlow Lite weights (~50MB).
-      # Remove it if you are not using markitdown's AI file-type detection.
-      run: |
-        python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
-
-    - name: Upload Intel slice
-      uses: actions/upload-artifact@v4
-      with:
-        name: macos-intel-app
-        path: dist/Mark-Those-things-up.app
-
-  # JOB 2b: macOS Apple Silicon (arm64) slice
+  # JOB 2: macOS Apple Silicon (arm64) — macos-latest is now an M1 runner
   build-macos-arm:
-    runs-on: macos-latest     # macos-latest is now arm64 (M1) on GitHub Actions
+    runs-on: macos-latest
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -94,7 +56,7 @@ jobs:
         python-version: '3.11'
         cache: 'pip'
 
-    - name: Cache PyInstaller build directory (arm64)
+    - name: Cache PyInstaller build directory
       uses: actions/cache@v4
       with:
         path: build
@@ -107,67 +69,20 @@ jobs:
         python3 -m pip install --upgrade pip
         python3 -m pip install -r requirements.txt
 
-    - name: Run PyInstaller (arm64)
+    - name: Run PyInstaller and Compress (arm64)
+      # NOTE: --collect-all magika bundles TensorFlow Lite weights (~50MB).
+      # Remove it if you are not using markitdown's AI file-type detection.
       run: |
         python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
+        # Strip quarantine so users don't hit the Gatekeeper "damaged" dialog
+        xattr -cr dist/Mark-Those-things-up.app
+        cd dist && zip -r ../Mark-Those-things-up-Mac.zip Mark-Those-things-up.app
 
-    - name: Upload arm64 slice
-      uses: actions/upload-artifact@v4
-      with:
-        name: macos-arm-app
-        path: dist/Mark-Those-things-up.app
-
-  # JOB 2c: Merge both slices into a Universal binary using lipo, then zip
-  build-macos-universal:
-    needs: [build-macos-intel, build-macos-arm]
-    runs-on: macos-latest
-    steps:
-    - name: Download Intel slice
-      uses: actions/download-artifact@v4
-      with:
-        name: macos-intel-app
-        path: ./intel-app/Mark-Those-things-up.app
-
-    - name: Download arm64 slice
-      uses: actions/download-artifact@v4
-      with:
-        name: macos-arm-app
-        path: ./arm-app/Mark-Those-things-up.app
-
-    - name: Merge into Universal binary with lipo
-      run: |
-        # Copy the arm64 .app as the base for the Universal bundle
-        cp -R ./arm-app/Mark-Those-things-up.app ./universal-app/Mark-Those-things-up.app
-
-        # Find every Mach-O binary in the arm64 bundle and merge the Intel slice into it
-        find ./arm-app/Mark-Those-things-up.app -type f | while read arm_file; do
-          rel="${arm_file#./arm-app/Mark-Those-things-up.app/}"
-          intel_file="./intel-app/Mark-Those-things-up.app/$rel"
-          universal_file="./universal-app/Mark-Those-things-up.app/$rel"
-
-          if [ -f "$intel_file" ]; then
-            # Check if this is a Mach-O binary (not a text/resource file)
-            if file "$arm_file" | grep -q "Mach-O"; then
-              lipo -create "$arm_file" "$intel_file" -output "$universal_file"
-            fi
-          fi
-        done
-
-    - name: Remove quarantine attribute
-      # Strips com.apple.quarantine so end-users don't hit the Gatekeeper
-      # "damaged and can't be opened" dialog after downloading the zip.
-      run: xattr -cr ./universal-app/Mark-Those-things-up.app
-
-    - name: Zip Universal app
-      run: |
-        cd universal-app
-        zip -r ../Mark-Those-things-up-Mac-Universal.zip Mark-Those-things-up.app
-
-    - name: Upload macOS Universal Staging Artifact
+    - name: Upload macOS Staging Artifact
       uses: actions/upload-artifact@v4
       with:
         name: macos-bin
-        path: Mark-Those-things-up-Mac-Universal.zip
+        path: Mark-Those-things-up-Mac.zip
 
   # JOB 3: Linux executable (.bin — same pattern as Windows, no platform-specific deps)
   build-linux:
@@ -209,7 +124,7 @@ jobs:
 
   # JOB 4: Collect all platform builds and publish a unified release
   create-release:
-    needs: [build-windows, build-macos-universal, build-linux]
+    needs: [build-windows, build-macos-arm, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -253,7 +168,7 @@ jobs:
           | Platform | File |
           |----------|------|
           | Windows | `Mark-Those-things-up.exe` |
-          | macOS (Universal — Intel + Apple Silicon) | `Mark-Those-things-up-Mac-Universal.zip` |
+          | macOS (Apple Silicon) | `Mark-Those-things-up-Mac.zip` |
           | Linux | `Mark-Those-things-up-Linux` |
         draft: false
         prerelease: false
