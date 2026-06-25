@@ -4,21 +4,42 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from markitdown import MarkItDown
+import tksvg
 
-class BatchMarkItDownApp:
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temporary folder and stores its path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+class MarkThoseThingsUpApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("MarkItDown - Bulk Production Suite")
+        self.root.title("Mark Those things up")
         self.root.geometry("800x550")
         self.root.configure(bg="#1e1e1e")
         
-        # Core data tracking
-        self.file_queue = []  # Elements: {"id": i, "path": "...", "status": "Pending", "size": "..."}
+        # Core batch data tracking
+        self.file_queue = []  # Elements: {"id": i, "path": "...", "name": "...", "type": "...", "size": "...", "status": "..."}
         self.output_directory = None
         self.is_processing = False
+        
+        # Initialize Microsoft's MarkItDown converter engine
         self.converter = MarkItDown()
         
-        # Apply premium UI styling
+        # Load and bind application vector SVG logo
+        self.logo_img = None
+        try:
+            # tksvg parses raw vectors directly inside standard Tkinter setups
+            self.logo_img = tksvg.SvgImage(file=resource_path("logo.svg"))
+            self.root.iconphoto(False, self.logo_img)
+        except Exception as e:
+            print(f"SVG icon failed to load natively: {e}")
+            
+        # Apply visual styles and spin up UI
         self.apply_styles()
         self.setup_ui()
 
@@ -26,7 +47,7 @@ class BatchMarkItDownApp:
         self.style = ttk.Style()
         self.style.theme_use("default")
         
-        # Configure Table/Treeview Custom Styling
+        # Configure Table Grid (Treeview) Styling
         self.style.configure("Treeview", 
             background="#252526", 
             foreground="#ffffff", 
@@ -52,34 +73,56 @@ class BatchMarkItDownApp:
         )
 
     def setup_ui(self):
-        # 1. Top Control Bar Frame
+        # 1. Top Bar Brand Panel
         top_frame = tk.Frame(self.root, bg="#1a1a1a", height=60)
         top_frame.pack(fill=tk.X, side=tk.TOP)
         top_frame.pack_propagate(False)
         
-        title_label = tk.Label(top_frame, text="MarkItDown Studio", font=("Segoe UI", 14, "bold"), bg="#1a1a1a", fg="#ffffff")
-        title_label.pack(side=tk.LEFT, padx=20)
+        if self.logo_img:
+            # Draw vector logo inside header bar
+            logo_display = tk.Label(top_frame, image=self.logo_img, bg="#1a1a1a")
+            logo_display.image = self.logo_img
+            logo_display.pack(side=tk.LEFT, padx=(20, 0))
+            
+        title_label = tk.Label(
+            top_frame, 
+            text="Mark Those things up", 
+            font=("Segoe UI", 14, "bold"), 
+            bg="#1a1a1a", 
+            fg="#ffffff"
+        )
+        title_label.pack(side=tk.LEFT, padx=10)
         
-        # 2. Main Dashboard Layout Area
+        # 2. Workspace Control Layout Container
         main_container = tk.Frame(self.root, bg="#1e1e1e", padx=20, pady=15)
         main_container.pack(fill=tk.BOTH, expand=True)
         
-        # Toolbar actions grid
+        # Upper action toolbar bar
         toolbar = tk.Frame(main_container, bg="#1e1e1e")
         toolbar.pack(fill=tk.X, pady=(0, 10))
         
-        self.btn_add = tk.Button(toolbar, text="+ Add Files", command=self.add_files, bg="#007acc", fg="#ffffff", bd=0, padx=12, pady=6, font=("Segoe UI", 9, "bold"), activebackground="#0062a3", activeforeground="#ffffff", cursor="hand2")
+        self.btn_add = tk.Button(
+            toolbar, text="+ Add Files", command=self.add_files, 
+            bg="#007acc", fg="#ffffff", bd=0, padx=14, pady=6, 
+            font=("Segoe UI", 9, "bold"), activebackground="#0062a3", 
+            activeforeground="#ffffff", cursor="hand2"
+        )
         self.btn_add.pack(side=tk.LEFT, padx=(0, 8))
         
-        self.btn_clear = tk.Button(toolbar, text="Clear Queue", command=self.clear_queue, bg="#2d2d2d", fg="#ffffff", bd=0, padx=12, pady=6, font=("Segoe UI", 9), activebackground="#3e3e42", activeforeground="#ffffff", cursor="hand2")
+        self.btn_clear = tk.Button(
+            toolbar, text="Clear Queue", command=self.clear_queue, 
+            bg="#2d2d2d", fg="#ffffff", bd=0, padx=14, pady=6, 
+            font=("Segoe UI", 9), activebackground="#3e3e42", 
+            activeforeground="#ffffff", cursor="hand2"
+        )
         self.btn_clear.pack(side=tk.LEFT, padx=8)
         
-        # Output directory destination choice control
-        self.dest_var = tk.IntVar(value=0) # 0 = same directory, 1 = custom destination
+        # Destination directory radio tracking buttons
+        self.dest_var = tk.IntVar(value=0) # 0 = matching source dir, 1 = user selected folder
         tk.Radiobutton(toolbar, text="Save next to source files", variable=self.dest_var, value=0, bg="#1e1e1e", fg="#bbbbbb", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="#ffffff", font=("Segoe UI", 9), command=self.toggle_dest_mode).pack(side=tk.RIGHT, padx=10)
         tk.Radiobutton(toolbar, text="Custom Folder...", variable=self.dest_var, value=1, bg="#1e1e1e", fg="#bbbbbb", selectcolor="#1e1e1e", activebackground="#1e1e1e", activeforeground="#ffffff", font=("Segoe UI", 9), command=self.toggle_dest_mode).pack(side=tk.RIGHT)
         
-        # 3. Central Batch Queue Spreadsheet Grid (Treeview)
+        # 3. Main Operational Spreadsheet Grid Display
         grid_frame = tk.Frame(main_container, bg="#1e1e1e")
         grid_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -100,28 +143,32 @@ class BatchMarkItDownApp:
         self.tree.column("size", width=90, anchor=tk.CENTER)
         self.tree.column("status", width=120, anchor=tk.CENTER)
         
-        # 4. Footer Console Processing Panel
-# 4. Footer Console Processing Panel
+        # 4. Lower Processing Console Footer Panel
         footer_frame = tk.Frame(self.root, bg="#1a1a1a", padx=15, pady=15)
         footer_frame.pack(fill=tk.X, side=tk.BOTTOM)
         
         self.progress_bar = ttk.Progressbar(footer_frame, style="Modern.Horizontal.TProgressbar", mode="determinate")
         self.progress_bar.pack(fill=tk.X, pady=(0, 8))
         
-        self.status_lbl = tk.Label(footer_frame, text="Queue empty. Ready to accept files.", font=("Segoe UI", 9), bg="#1a1a1a", fg="#888888")
+        self.status_lbl = tk.Label(footer_frame, text="Queue empty. Ready to parse content.", font=("Segoe UI", 9), bg="#1a1a1a", fg="#888888")
         self.status_lbl.pack(side=tk.LEFT)
         
-        self.btn_start = tk.Button(footer_frame, text="Start Batch Processing", command=self.start_batch_thread, bg="#4ec9b0", fg="#1a1a1a", bd=0, padx=20, pady=8, font=("Segoe UI", 10, "bold"), activebackground="#3eb399", activeforeground="#1a1a1a", state=tk.DISABLED, cursor="hand2")
+        self.btn_start = tk.Button(
+            footer_frame, text="Start Batch Processing", command=self.start_batch_thread, 
+            bg="#4ec9b0", fg="#1a1a1a", bd=0, padx=20, pady=8, 
+            font=("Segoe UI", 10, "bold"), activebackground="#3eb399", 
+            activeforeground="#1a1a1a", state=tk.DISABLED, cursor="hand2"
+        )
         self.btn_start.pack(side=tk.RIGHT)
 
     def toggle_dest_mode(self):
         if self.dest_var.get() == 1:
-            chosen = filedialog.askdirectory(title="Select Destination Directory")
+            chosen = filedialog.askdirectory(title="Select Destination Folder")
             if chosen:
                 self.output_directory = chosen
                 self.status_lbl.config(text=f"Destination locked to: {os.path.basename(chosen)}", fg="#4ec9b0")
             else:
-                self.dest_var.set(0) # Reset if aborted
+                self.dest_var.set(0)
                 self.output_directory = None
 
     def add_files(self):
@@ -133,7 +180,6 @@ class BatchMarkItDownApp:
         )
         
         for file_path in files:
-            # Prevent duplicate files in the list
             if any(item['path'] == file_path for item in self.file_queue):
                 continue
                 
@@ -156,7 +202,6 @@ class BatchMarkItDownApp:
             }
             
             self.file_queue.append(file_item)
-            # Insert item natively into graphical grid
             self.tree.insert("", tk.END, iid=str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], file_item["status"]))
             
         if self.file_queue:
@@ -180,7 +225,7 @@ class BatchMarkItDownApp:
         self.btn_add.config(state=tk.DISABLED)
         self.btn_clear.config(state=tk.DISABLED)
         
-        # Spin up execution on a separate safe worker thread
+        # Safely pass task thread execution over to a non-blocking background runner
         threading.Thread(target=self.process_batch, daemon=True).start()
 
     def process_batch(self):
@@ -189,16 +234,14 @@ class BatchMarkItDownApp:
         self.progress_bar["value"] = 0
         
         for index, file_item in enumerate(self.file_queue):
-            # Update grid to show running conversion thread state
             self.tree.item(str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], "Converting..."))
             self.status_lbl.config(text=f"Processing {index + 1}/{total_files}: {file_item['name']}", fg="#007acc")
             self.root.update_idletasks()
             
             try:
-                # Execute engine parser logic
+                # Run the Microsoft document parsing logic
                 result = self.converter.convert(file_item["path"])
                 
-                # Determine output target path
                 if self.dest_var.get() == 0 or not self.output_directory:
                     base, _ = os.path.splitext(file_item["path"])
                     output_path = base + ".md"
@@ -211,20 +254,8 @@ class BatchMarkItDownApp:
                     
                 self.tree.item(str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], "✓ Success"))
             except Exception as e:
-                print(f"Error parsing file: {e}")
+                print(f"Error parsing document target: {e}")
                 self.tree.item(str(file_item["id"]), values=(file_item["name"], file_item["type"], file_item["size"], "✕ Failed"))
                 
             self.progress_bar["value"] = index + 1
-            self.root.update_idletasks()
-            
-        # UI Restoration Phase post batch run completion
-        self.is_processing = False
-        self.status_lbl.config(text=f"Batch job complete! Verified {total_files} files evaluated.", fg="#4ec9b0")
-        self.btn_add.config(state=tk.NORMAL)
-        self.btn_clear.config(state=tk.NORMAL)
-        messagebox.showinfo("Batch Conversion Complete", f"Successfully evaluated and structured your batch pipeline.")
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = BatchMarkItDownApp(root)
-    root.mainloop()
+            self.root.update
