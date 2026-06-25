@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # JOB 1: Compiles the Windows Executable
+  # JOB 1: Compiles the Windows Executable (Mantiene --onefile porque Windows sí necesita el .exe suelto)
   build-windows:
     runs-on: windows-latest
     steps:
@@ -32,7 +32,7 @@ jobs:
         name: windows-bin
         path: dist/Mark-Those-things-up.exe
 
-  # JOB 2: Compiles the macOS Executable
+  # JOB 2: Compiles the macOS Executable (OPTIMIZADO - Más rápido)
   build-macos:
     runs-on: macos-latest
     steps:
@@ -52,7 +52,8 @@ jobs:
 
     - name: Run PyInstaller and Compress (macOS)
       run: |
-        python3 -m PyInstaller --onefile --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
+        # Se eliminó --onefile para evitar la compresión lenta de PyInstaller. --windowed creará el .app directamente.
+        python3 -m PyInstaller --windowed --name="Mark-Those-things-up" --add-data "logo.png:." --collect-all markitdown --collect-all magika app.py
         cd dist
         zip -r ../Mark-Those-things-up-Mac.zip Mark-Those-things-up.app
 
@@ -84,8 +85,8 @@ jobs:
     - name: Create Unified GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v1.5.${{ github.run_number }}
-        name: Mark Those things up v1.5.${{ github.run_number }}
+        tag_name: v1.6.${{ github.run_number }}
+        name: Mark Those things up v1.6.${{ github.run_number }}
         body: |
           Official cross-platform production release of **Mark Those things up**.
           
